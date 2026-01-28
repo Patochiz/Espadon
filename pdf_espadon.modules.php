@@ -69,10 +69,20 @@ class pdf_espadon extends ModelePdfExpedition
 	 */
 	public $version = 'dolibarr';
 
+	/**
+	 * Current chunk index for Liste Colis multi-page rendering (Einstein format)
+	 * @var int
+	 */
+	public static $listeColisChunkIndex = 0;
+
 	public $posxweightvol;
 	public $posxqtytoship;
 	public $posxqtyordered;
 
+	// Einstein format: positions for columns
+	public $posxdesc;           // Position for description column
+	public $posxqty;            // Position for quantity column
+	public $posxlistecolis;     // Position for Liste Colis table (right side)
 
 	/**
 	 *	Constructor
@@ -97,6 +107,11 @@ class pdf_espadon extends ModelePdfExpedition
 		$this->marge_droite = getDolGlobalInt('MAIN_PDF_MARGIN_RIGHT', 10);
 		$this->marge_haute = getDolGlobalInt('MAIN_PDF_MARGIN_TOP', 10);
 		$this->marge_basse = getDolGlobalInt('MAIN_PDF_MARGIN_BOTTOM', 10);
+
+		// Einstein format: Initialize column positions (60% main table, 40% Liste Colis)
+		$this->posxdesc = $this->marge_gauche + 1;
+		$this->posxqty = 90;           // Quantity column position
+		$this->posxlistecolis = 127;   // Start of Liste Colis table (60/40 split)
 
 		$this->option_logo = 1; // Display logo
 		$this->option_draft_watermark = 1; // Support add of a watermark on drafts
@@ -206,6 +221,9 @@ class pdf_espadon extends ModelePdfExpedition
 			$this->posxpicture = $this->posxweightvol;
 		}
 
+		// CRITICAL: Reset Liste Colis chunk index at the start of each PDF generation
+		self::$listeColisChunkIndex = 0;
+
 		if ($conf->expedition->dir_output) {
 			// Definition of $dir and $file
 			if ($object->specimen) {
@@ -240,8 +258,23 @@ class pdf_espadon extends ModelePdfExpedition
 
 				$pdf = pdf_getInstance($this->format);
 				$default_font_size = pdf_getPDFFontSize($outputlangs);
-				$heightforinfotot = 8; // Height reserved to output the info and total part
-				$heightforfreetext = (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT) ? $conf->global->MAIN_PDF_FREETEXT_HEIGHT : 5); // Height reserved to output the free text on last page
+
+				// Calculate heightforinfotot dynamically based on colisage text
+				$colisage_extrafield = !empty($object->array_options['options_colisage']) ? html_entity_decode($object->array_options['options_colisage'], ENT_QUOTES | ENT_HTML5, 'UTF-8') : '';
+				$colisage_extrafield = preg_replace('/<br\s*\/?>/i', "\n", $colisage_extrafield);
+
+				// Set font to calculate string height
+				$pdf->SetFont('', 'B', $default_font_size);
+
+				// Calculate colisage height (70% of total width ~133mm)
+				$total_width = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
+				$col1_width = $total_width * 0.70;
+				$colisage_height = $pdf->getStringHeight($col1_width - 2, mb_strtoupper($colisage_extrafield, 'UTF-8'));
+
+				// Optimized heights for better space usage (colisage 10mm + transporteur 15mm + notice 15mm + spacings 4mm = ~44mm, reduced to 38mm for better page usage)
+				$extra_colisage_height = max(0, $colisage_height - 5);
+				$heightforinfotot = 38 + $extra_colisage_height; // Height reserved to output the info and total part (colisage+transporteur+notice tables)
+				$heightforfreetext = (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT) ? $conf->global->MAIN_PDF_FREETEXT_HEIGHT : 3); // Height reserved to output the free text on last page (reduced from 5 to 3)
 				$heightforfooter = $this->marge_basse + 8; // Height reserved to output the footer (value include bottom margin)
 				if (getDolGlobalString('MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS')) {
 					$heightforfooter += 6;
@@ -293,6 +326,7 @@ class pdf_espadon extends ModelePdfExpedition
 				$tab_top = 90;	// position of top tab
 				$tab_top_newpage = (!getDolGlobalInt('MAIN_PDF_DONOTREPEAT_HEAD') ? 42 + $top_shift : 10);
 
+				// Initial height calculation - will be recalculated after tab_top adjustments
 				$tab_height = $this->page_hauteur - $tab_top - $heightforfooter - $heightforfreetext;
 
 				$this->posxdesc = $this->marge_gauche + 1;
@@ -315,6 +349,8 @@ class pdf_espadon extends ModelePdfExpedition
 
 						$tab_top = $nexY + 6;
 						$height_incoterms += 4;
+						// Recalculate tab_height after tab_top modification (include heightforinfotot for consistency with final table drawing)
+						$tab_height = $this->page_hauteur - $tab_top - $heightforinfotot - $heightforfreetext - $heightforfooter;
 					}
 				}
 
@@ -496,8 +532,9 @@ class pdf_espadon extends ModelePdfExpedition
 							}
 						}
 
-						$tab_height = $tab_height - $height_note;
 						$tab_top = $posyafter + 6;
+						// Recalculate tab_height after tab_top modification (include heightforinfotot for consistency with final table drawing)
+						$tab_height = $this->page_hauteur - $tab_top - $heightforinfotot - $heightforfreetext - $heightforfooter;
 					} else {
 						$height_note = 0;
 					}
@@ -539,7 +576,14 @@ class pdf_espadon extends ModelePdfExpedition
 				}
 
 				// Use new auto column system
+				// Temporarily adjust effective page width for column calculations
+				$original_marge_droite = $this->marge_droite;
+				$this->marge_droite = $this->page_largeur - $this->posxlistecolis + 2;
+
 				$this->prepareArrayColumnField($object, $outputlangs, $hidedetails, $hidedesc, $hideref);
+
+				// Restore original values
+				$this->marge_droite = $original_marge_droite;
 
 				// Table simulation to know the height of the title line
 				$pdf->startTransaction();
@@ -554,8 +598,11 @@ class pdf_espadon extends ModelePdfExpedition
 				$pagenb = $pageposbeforeprintlines;
 				for ($i = 0; $i < $nblines; $i++) {
 					$curY = $nexY;
-					$pdf->SetFont('', '', $default_font_size - 1); // Into loop to work with multipage
+					$pdf->SetFont('', '', $default_font_size - 2); // Into loop to work with multipage - match secondary table font size
 					$pdf->SetTextColor(0, 0, 0);
+
+					// Check if this is the special "Libelle_Cde" service (ID 361) used as title
+					$isTitleService = (isset($object->lines[$i]->fk_product) && $object->lines[$i]->fk_product == 361);
 
 					// Define size of image if we need it
 					$imglinesize = array();
@@ -571,6 +618,7 @@ class pdf_espadon extends ModelePdfExpedition
 					$posYAfterImage = 0;
 					$posYAfterDescription = 0;
 					$heightforsignature = 0;
+					$hasDetailColumn = false; // Flag to track if this line has detail column (Einstein format)
 
 					if ($this->getColumnStatus('photo')) {
 						// We start with Photo of product line
@@ -602,15 +650,153 @@ class pdf_espadon extends ModelePdfExpedition
 
 					// Description of product line
 					if ($this->getColumnStatus('desc')) {
+						// Modify description for products to include detail extrafield in 2 columns (Einstein format)
+						if (!$isTitleService) {
+							$isProduct = (isset($object->lines[$i]->product_type) && $object->lines[$i]->product_type == 0);
+							$originalDesc = $object->lines[$i]->desc;
+							$detail = '';
+							if (!empty($object->lines[$i]->array_options['options_detail'])) {
+								$detail = $object->lines[$i]->array_options['options_detail'];
+							}
+							// Create a 2-column table with description and detail (only if detail exists)
+							// This table will extend into Qty column space for more horizontal room
+							if ($isProduct && !empty($detail)) {
+								$hasDetailColumn = true;
+								// Use Dolibarr's native HTML processing function for both columns
+								$processedDesc = dol_htmlentitiesbr($originalDesc);
+								$processedDetail = dol_htmlentitiesbr($detail);
+
+								// Get quantity to append to detail column
+								$qty = pdf_getlineqty($object, $i, $outputlangs, $hidedetails);
+								$unit = '';
+								if (getDolGlobalInt('PRODUCT_USE_UNITS')) {
+									$unit = pdf_getlineunit($object, $i, $outputlangs, $hidedetails);
+								}
+								$qty_with_unit = $qty;
+								if (!empty($unit)) {
+									$qty_with_unit .= ' ' . $unit;
+								}
+
+								// 45% for description, 55% for detail with qty at the end
+								$object->lines[$i]->desc = '<table width="100%" border="0" cellpadding="0" cellspacing="0"><tr>';
+								$object->lines[$i]->desc .= '<td width="45%" valign="top" align="left">' . $processedDesc . '</td>';
+								$object->lines[$i]->desc .= '<td width="55%" valign="top" align="left">' . $processedDetail;
+								$object->lines[$i]->desc .= '<br><strong>Qté: ' . $qty_with_unit . '</strong></td>';
+								$object->lines[$i]->desc .= '</tr></table>';
+							}
+						}
+
 						$pdf->startTransaction();
 
-						$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+						if ($isTitleService) {
+							// Special handling for title service (ID 361): display description in BOLD spanning Designation + Qty columns
+							$pdf->SetFont('', 'B', $default_font_size);
+							$fullWidth = $this->posxlistecolis - $this->posxdesc;
+
+							// Use description field for title text
+							$titleText = '';
+							if (!empty($object->lines[$i]->desc)) {
+								$titleText = $object->lines[$i]->desc;
+							}
+
+							// Use writeHTMLCell for HTML support (underline, italic, etc.)
+							$pdf->writeHTMLCell($fullWidth, 3, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
+							// Add small spacing after title to separate from next product
+							$pdf->Ln(1);
+						} else {
+							// Normal product line
+							// First, display product label spanning both Désignation and Détail columns (100mm)
+							$product_label = '';
+							if (!empty($object->lines[$i]->product_label)) {
+								$product_label = $object->lines[$i]->product_label;
+							} elseif (!empty($object->lines[$i]->label)) {
+								$product_label = $object->lines[$i]->label;
+							}
+
+							if (!empty($product_label)) {
+								$pdf->SetFont('', 'B', $default_font_size - 2);
+								$pdf->SetXY($this->getColumnContentXStart('desc'), $curY);
+								// Display label on 100mm (Désignation + Détail columns)
+								$pdf->writeHTMLCell(100, 0, $this->getColumnContentXStart('desc'), $curY, dol_htmlentitiesbr($product_label), 0, 1, false, true, 'L');
+								$curY = $pdf->GetY();
+								// Reset font to normal for product description
+								$pdf->SetFont('', '', $default_font_size - 2);
+							}
+
+							// Then display the rest of the description
+							// Temporarily hide label to prevent duplication
+							$saved_label = $object->lines[$i]->label ?? null;
+							$saved_product_label = $object->lines[$i]->product_label ?? null;
+							$object->lines[$i]->label = '';
+							$object->lines[$i]->product_label = '';
+
+							// If line has detail column, extend width to include Qty column space
+							if ($hasDetailColumn) {
+								$lineWidth = $this->posxlistecolis - $this->posxdesc - 2;
+								$pdf->writeHTMLCell($lineWidth, 0, $this->posxdesc, $curY, $object->lines[$i]->desc, 0, 1, false, true, 'L');
+							} else {
+								$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+							}
+
+							// Restore original labels
+							$object->lines[$i]->label = $saved_label;
+							$object->lines[$i]->product_label = $saved_product_label;
+						}
 
 						$pageposafter = $pdf->getPage();
 						if ($pageposafter > $pageposbefore) {	// There is a pagebreak
 							$pdf->rollbackTransaction(true);
+							$pageposafter = $pageposbefore;
+							$pdf->setPageOrientation('', 1, $heightforfooter + $heightforfreetext + $heightforinfotot); // The only function to edit the bottom margin of current page to set it.
 
-							$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+							if ($isTitleService) {
+								// Redisplay title service on new page
+								$pdf->SetFont('', 'B', $default_font_size);
+								$fullWidth = $this->posxlistecolis - $this->posxdesc;
+
+								$titleText = '';
+								if (!empty($object->lines[$i]->desc)) {
+									$titleText = $object->lines[$i]->desc;
+								}
+
+								// Use writeHTMLCell for HTML support (underline, italic, etc.)
+								$pdf->writeHTMLCell($fullWidth, 4, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
+								// Add small spacing after title to separate from next product
+								$pdf->Ln(1);
+							} else {
+								// Redisplay product label on new page
+								$product_label = '';
+								if (!empty($object->lines[$i]->product_label)) {
+									$product_label = $object->lines[$i]->product_label;
+								} elseif (!empty($object->lines[$i]->label)) {
+									$product_label = $object->lines[$i]->label;
+								}
+
+								if (!empty($product_label)) {
+									$pdf->SetFont('', 'B', $default_font_size - 2);
+									$pdf->SetXY($this->getColumnContentXStart('desc'), $curY);
+									$pdf->writeHTMLCell(100, 0, $this->getColumnContentXStart('desc'), $curY, dol_htmlentitiesbr($product_label), 0, 1, false, true, 'L');
+									$curY = $pdf->GetY();
+									// Reset font to normal for product description
+									$pdf->SetFont('', '', $default_font_size - 2);
+								}
+
+								// Temporarily hide label again to prevent duplication on retry
+								$object->lines[$i]->label = '';
+								$object->lines[$i]->product_label = '';
+
+								// If line has detail column, extend width to include Qty column space
+								if ($hasDetailColumn) {
+									$lineWidth = $this->posxlistecolis - $this->posxdesc - 2;
+									$pdf->writeHTMLCell($lineWidth, 0, $this->posxdesc, $curY, $object->lines[$i]->desc, 0, 1, false, true, 'L');
+								} else {
+									$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+								}
+
+								// Restore original labels
+								$object->lines[$i]->label = $saved_label;
+								$object->lines[$i]->product_label = $saved_product_label;
+							}
 
 							$pageposafter = $pdf->getPage();
 							$posyafter = $pdf->GetY();
@@ -658,38 +844,44 @@ class pdf_espadon extends ModelePdfExpedition
 						$curY = $tab_top_newpage;
 					}
 
-					$pdf->SetFont('', '', $default_font_size - 1); // We reposition the default font
+					$pdf->SetFont('', '', $default_font_size - 2); // We reposition the default font - match secondary table font size
 
-					// weight
+					// weight (skip for title service)
+					if (!$isTitleService && $this->getColumnStatus('weight')) {
+						$weighttxt = '';
+						if (empty($object->lines[$i]->fk_product_type) && $object->lines[$i]->weight) {
+							$weighttxt = round($object->lines[$i]->weight * $object->lines[$i]->qty_shipped, 5).' '.measuringUnitString(0, "weight", $object->lines[$i]->weight_units, 1);
+						}
+						$voltxt = '';
+						if (empty($object->lines[$i]->fk_product_type) && $object->lines[$i]->volume) {
+							$voltxt = round($object->lines[$i]->volume * $object->lines[$i]->qty_shipped, 5).' '.measuringUnitString(0, "volume", $object->lines[$i]->volume_units ? $object->lines[$i]->volume_units : 0, 1);
+						}
 
-					$weighttxt = '';
-					if (empty($object->lines[$i]->fk_product_type) && $object->lines[$i]->weight) {
-						$weighttxt = round($object->lines[$i]->weight * $object->lines[$i]->qty_shipped, 5).' '.measuringUnitString(0, "weight", $object->lines[$i]->weight_units, 1);
-					}
-					$voltxt = '';
-					if (empty($object->lines[$i]->fk_product_type) && $object->lines[$i]->volume) {
-						$voltxt = round($object->lines[$i]->volume * $object->lines[$i]->qty_shipped, 5).' '.measuringUnitString(0, "volume", $object->lines[$i]->volume_units ? $object->lines[$i]->volume_units : 0, 1);
-					}
-
-
-					if ($this->getColumnStatus('weight')) {
 						$this->printStdColumnContent($pdf, $curY, 'weight', $weighttxt.(($weighttxt && $voltxt) ? '<br>' : '').$voltxt);
 						$nexY = max($pdf->GetY(), $nexY);
 					}
 
-					if ($this->getColumnStatus('qty_asked')) {
+					if (!$isTitleService && $this->getColumnStatus('qty_asked')) {
 						$this->printStdColumnContent($pdf, $curY, 'qty_asked', $object->lines[$i]->qty_asked);
 						$nexY = max($pdf->GetY(), $nexY);
 					}
 
-					if ($this->getColumnStatus('unit_order')) {
+					if (!$isTitleService && $this->getColumnStatus('unit_order')) {
 						$this->printStdColumnContent($pdf, $curY, 'unit_order', measuringUnitString($object->lines[$i]->fk_unit));
 						$nexY = max($pdf->GetY(), $nexY);
 					}
 
 					if ($this->getColumnStatus('qty_shipped')) {
-						$this->printStdColumnContent($pdf, $curY, 'qty_shipped', $object->lines[$i]->qty_shipped);
-						$nexY = max($pdf->GetY(), $nexY);
+						// Don't display quantity for service ID 361 (Libelle_Cde - comment line) and when detail column extends into Qty space
+						if (!$isTitleService && !$hasDetailColumn) {
+							// Display quantity with unit
+							$qty_text = $object->lines[$i]->qty_shipped;
+							if (!empty($object->lines[$i]->fk_unit)) {
+								$qty_text .= ' ' . measuringUnitString($object->lines[$i]->fk_unit);
+							}
+							$this->printStdColumnContent($pdf, $curY, 'qty_shipped', $qty_text);
+							$nexY = max($pdf->GetY(), $nexY);
+						}
 					}
 
 					if ($this->getColumnStatus('subprice')) {
@@ -713,7 +905,8 @@ class pdf_espadon extends ModelePdfExpedition
 						$pdf->setPage($pageposafter);
 						$pdf->SetLineStyle(array('dash' => '1,1', 'color' => array(80, 80, 80)));
 						//$pdf->SetDrawColor(190,190,200);
-						$pdf->line($this->marge_gauche, $nexY, $this->page_largeur - $this->marge_droite, $nexY);
+						// Line only spans the main table, not Liste Colis table
+						$pdf->line($this->marge_gauche, $nexY, $this->posxlistecolis - 2, $nexY);
 						$pdf->SetLineStyle(array('dash' => 0));
 					}
 
@@ -722,8 +915,10 @@ class pdf_espadon extends ModelePdfExpedition
 						$pdf->setPage($pagenb);
 						if ($pagenb == $pageposbeforeprintlines) {
 							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs);
 						} else {
 							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						$pagenb++;
@@ -739,8 +934,10 @@ class pdf_espadon extends ModelePdfExpedition
 					if (isset($object->lines[$i + 1]->pagebreak) && $object->lines[$i + 1]->pagebreak) {
 						if ($pagenb == 1) {
 							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs);
 						} else {
 							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						// New page
@@ -758,14 +955,19 @@ class pdf_espadon extends ModelePdfExpedition
 				// Show square
 				if ($pagenb == 1) {
 					$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforinfotot - $heightforfreetext - $heightforfooter, 0, $outputlangs, 0, 0);
+					$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforinfotot - $heightforfreetext - $heightforfooter, $object, $outputlangs);
 					$bottomlasttab = $this->page_hauteur - $heightforinfotot - $heightforfreetext - $heightforfooter + 1;
 				} else {
 					$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforinfotot - $heightforfreetext - $heightforfooter, 0, $outputlangs, 1, 0);
+					$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforinfotot - $heightforfreetext - $heightforfooter, $object, $outputlangs);
 					$bottomlasttab = $this->page_hauteur - $heightforinfotot - $heightforfreetext - $heightforfooter + 1;
 				}
 
 				// Display total area
 				$posy = $this->_tableau_tot($pdf, $object, 0, $bottomlasttab, $outputlangs);
+
+				// Display transporteur signature table
+				$posy = $this->_tableau_transporteur($pdf, $object, $posy, $outputlangs);
 
 				// Pagefoot
 				$this->_pagefoot($pdf, $object, $outputlangs);
@@ -819,94 +1021,140 @@ class pdf_espadon extends ModelePdfExpedition
 		// phpcs:enable
 		global $conf, $mysoc;
 
-		$sign = 1;
-
 		$default_font_size = pdf_getPDFFontSize($outputlangs);
 
-		$tab2_top = $posy;
-		$tab2_hl = 4;
-		$pdf->SetFont('', 'B', $default_font_size - 1);
+		// Total table width: full page width minus margins
+		$total_width = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
 
-		// Total table
-		$col1x = $this->posxweightvol - 50;
-		$col2x = $this->posxweightvol;
-		/*if ($this->page_largeur < 210) // To work with US executive format
-		{
-			$col2x-=20;
-		}*/
-		if (!getDolGlobalString('SHIPPING_PDF_HIDE_ORDERED')) {
-			$largcol2 = ($this->posxqtyordered - $this->posxweightvol);
-		} else {
-			$largcol2 = ($this->posxqtytoship - $this->posxweightvol);
-		}
+		// Column widths: 70% and 30%
+		$col1_width = $total_width * 0.70; // ~133mm
+		$col2_width = $total_width * 0.30; // ~57mm
 
-		$useborder = 0;
-		$index = 0;
+		$tab_top = $posy;
+		$line_height = 5;
 
-		$totalWeighttoshow = '';
-		$totalVolumetoshow = '';
+		// Get extrafield values from shipment
+		$colisage = !empty($object->array_options['options_colisage']) ? html_entity_decode($object->array_options['options_colisage'], ENT_QUOTES | ENT_HTML5, 'UTF-8') : '';
+		// Convert HTML line breaks to actual newlines
+		$colisage = preg_replace('/<br\s*\/?>/i', "\n", $colisage);
+		$total_de_colis = !empty($object->array_options['options_total_de_colis']) ? $object->array_options['options_total_de_colis'] : '';
+		$poids_total = !empty($object->array_options['options_poids_total']) ? $object->array_options['options_poids_total'] : '';
 
-		// Load dim data
-		$tmparray = $object->getTotalWeightVolume();
-		$totalWeight = $tmparray['weight'];
-		$totalVolume = $tmparray['volume'];
-		$totalOrdered = $tmparray['ordered'];
-		$totalToShip = $tmparray['toship'];
-		// Set trueVolume and volume_units not currently stored into database
-		if ($object->trueWidth && $object->trueHeight && $object->trueDepth) {
-			$object->trueVolume = price(((float) $object->trueWidth * (float) $object->trueHeight * (float) $object->trueDepth), 0, $outputlangs, 0, 0);
-			$object->volume_units = (float) $object->size_units * 3;
-		}
-
-		if (!empty($totalWeight)) {
-			$totalWeighttoshow = showDimensionInBestUnit($totalWeight, 0, "weight", $outputlangs, -1, 'no', 1);
-		}
-		if (!empty($totalVolume)) {
-			$totalVolumetoshow = showDimensionInBestUnit($totalVolume, 0, "volume", $outputlangs, -1, 'no', 1);
-		}
-		if (!empty($object->trueWeight)) {
-			$totalWeighttoshow = showDimensionInBestUnit($object->trueWeight, $object->weight_units, "weight", $outputlangs);
-		}
-		if (!empty($object->trueVolume)) {
-			if ($object->volume_units < 50) {
-				$totalVolumetoshow = showDimensionInBestUnit($object->trueVolume, $object->volume_units, "volume", $outputlangs);
-			} else {
-				$totalVolumetoshow =  price($object->trueVolume, 0, $outputlangs, 0, 0).' '.measuringUnitString(0, "volume", $object->volume_units);
-			}
-		}
-
-		if ($this->getColumnStatus('desc')) {
-			$this->printStdColumnContent($pdf, $tab2_top, 'desc', $outputlangs->transnoentities("Total"));
-		}
-
-
-		if ($this->getColumnStatus('weight')) {
-			if ($totalWeighttoshow) {
-				$this->printStdColumnContent($pdf, $tab2_top, 'weight', $totalWeighttoshow);
-				$index++;
-			}
-
-			if ($totalVolumetoshow) {
-				$y = $tab2_top + ($tab2_hl * $index);
-				$this->printStdColumnContent($pdf, $y, 'weight', $totalVolumetoshow);
-			}
-		}
-
-		if ($this->getColumnStatus('qty_asked') && $totalOrdered) {
-			$this->printStdColumnContent($pdf, $tab2_top, 'qty_asked', $totalOrdered);
-		}
-
-		if ($this->getColumnStatus('qty_shipped') && $totalToShip) {
-			$this->printStdColumnContent($pdf, $tab2_top, 'qty_shipped', $totalToShip);
-		}
-
-		if ($this->getColumnStatus('subprice')) {
-			$this->printStdColumnContent($pdf, $tab2_top, 'subprice', price($object->total_ht, 0, $outputlangs));
-		}
-
+		// Set font to bold and normal size
+		$pdf->SetFont('', 'B', $default_font_size);
 		$pdf->SetTextColor(0, 0, 0);
 
-		return ($tab2_top + ($tab2_hl * $index));
+		// Calculate height needed for colisage text (with <br /> tags converted to newlines)
+		$colisage_text = mb_strtoupper($colisage, 'UTF-8');
+		$colisage_height = $pdf->getStringHeight($col1_width - 2, $colisage_text);
+		// Add padding
+		$row1_height = max($line_height, $colisage_height + 2);
+		$row2_height = $line_height;
+		$table_height = $row1_height + $row2_height;
+
+		// Draw table border (only outer rectangle, no internal lines)
+		$pdf->SetDrawColor(128, 128, 128);
+		$pdf->Rect($this->marge_gauche, $tab_top, $total_width, $table_height);
+
+		// Column 1, Row 1: Colisage in uppercase, left aligned
+		$pdf->SetXY($this->marge_gauche + 1, $tab_top + 1);
+		$pdf->MultiCell($col1_width - 2, $row1_height - 2, $colisage_text, 0, 'L', false, 1);
+
+		// Column 1, Row 2: "NOMBRE TOTAL DE COLIS : X COLIS" in uppercase, left aligned
+		$colis_text = '';
+		if (!empty($total_de_colis)) {
+			$colis_text = mb_strtoupper('Nombre total de colis : ' . $total_de_colis . ' Colis', 'UTF-8');
+		}
+		$pdf->SetXY($this->marge_gauche + 1, $tab_top + $row1_height + 1);
+		$pdf->MultiCell($col1_width - 2, $row2_height - 2, $colis_text, 0, 'L', false, 1);
+
+		// Column 2, Row 1: "Poids Total" centered
+		$pdf->SetXY($this->marge_gauche + $col1_width + 1, $tab_top + 1);
+		$pdf->MultiCell($col2_width - 2, $row1_height - 2, 'Poids Total', 0, 'C', false, 1);
+
+		// Column 2, Row 2: "X Kg" centered
+		$poids_text = '';
+		if (!empty($poids_total)) {
+			$poids_text = $poids_total . ' Kg';
+		}
+		$pdf->SetXY($this->marge_gauche + $col1_width + 1, $tab_top + $row1_height + 1);
+		$pdf->MultiCell($col2_width - 2, $row2_height - 2, $poids_text, 0, 'C', false, 1);
+
+		return ($tab_top + $table_height);
+	}
+
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
+	/**
+	 *	Show transporteur signature table
+	 *
+	 *	@param	TCPDF		$pdf            Object PDF
+	 *	@param  Expedition	$object         Object expedition
+	 *	@param	int         $posy           Start Position
+	 *	@param	Translate	$outputlangs	Object langs
+	 *	@return int							Position for suite
+	 */
+	protected function _tableau_transporteur(&$pdf, $object, $posy, $outputlangs)
+	{
+		// phpcs:enable
+		$default_font_size = pdf_getPDFFontSize($outputlangs);
+
+		// Total table width: full page width minus margins
+		$total_width = $this->page_largeur - $this->marge_gauche - $this->marge_droite;
+
+		// Column widths: 66% and 33%
+		$col1_width = $total_width * 0.66; // ~125mm
+		$col2_width = $total_width * 0.34; // ~65mm
+
+		$tab_top = $posy + 2; // 2mm spacing from previous table
+		$line_height = 5; // Height per line (reduced from 7 to avoid footer overlap)
+		$table_height = $line_height * 3; // 3 rows
+
+		// Draw outer rectangle
+		$pdf->SetDrawColor(128, 128, 128);
+		$pdf->Rect($this->marge_gauche, $tab_top, $total_width, $table_height);
+
+		// Draw vertical line separating the two columns
+		$pdf->line($this->marge_gauche + $col1_width, $tab_top, $this->marge_gauche + $col1_width, $tab_top + $table_height);
+
+		// Set font to normal size
+		$pdf->SetFont('', '', $default_font_size);
+		$pdf->SetTextColor(0, 0, 0);
+
+		// Column 1, Row 1: "Transporteur :"
+		$pdf->SetXY($this->marge_gauche + 1, $tab_top + 1);
+		$pdf->Cell($col1_width - 2, $line_height - 2, 'Transporteur :', 0, 0, 'L');
+
+		// Column 1, Row 2: "Nom :"
+		$pdf->SetXY($this->marge_gauche + 1, $tab_top + $line_height + 1);
+		$pdf->Cell($col1_width - 2, $line_height - 2, 'Nom :', 0, 0, 'L');
+
+		// Column 1, Row 3: "Remorque :"
+		$pdf->SetXY($this->marge_gauche + 1, $tab_top + ($line_height * 2) + 1);
+		$pdf->Cell($col1_width - 2, $line_height - 2, 'Remorque :', 0, 0, 'L');
+
+		// Column 2, Row 1: "Signature :"
+		$pdf->SetXY($this->marge_gauche + $col1_width + 1, $tab_top + 1);
+		$pdf->Cell($col2_width - 2, $line_height - 2, 'Signature :', 0, 0, 'L');
+
+		// Column 2, Rows 2+3: Empty space for signature (no text needed, just the rectangle)
+
+		// Add important notice box below transporteur table
+		$notice_top = $tab_top + $table_height + 2; // 2mm spacing
+		$notice_height = 15; // Height for the notice box
+
+		// Draw rectangle for notice
+		$pdf->Rect($this->marge_gauche, $notice_top, $total_width, $notice_height);
+
+		// Set font to smaller size for notice text
+		$pdf->SetFont('', '', $default_font_size - 2);
+
+		// Prepare the text with HTML formatting for bold "IMPORTANT :"
+		$notice_text = '<b>IMPORTANT :</b> A la réception de votre commande, contrôlez soigneusement le nombre et l\'état des colis. En cas de litige ou de doute sur l\'état des produits, formulez des réserves écrites, significatives et complètes sur le récépissé de transport. Si l\'incident est confirmé, envoyez sous 48h une lettre recommandée avec accusé de réception au transporteur ainsi qu\'une copie à notre service commercial. Ces dispositions sont prises en application de l\'article L 133-3 du code du commerce. Les retours éventuels ne pourront s\'effectuer qu\'après accord du service commercial.';
+
+		// Write the text in the box (justified)
+		$pdf->writeHTMLCell($total_width - 2, $notice_height - 2, $this->marge_gauche + 1, $notice_top + 1, $notice_text, 0, 1, false, true, 'J');
+
+		return ($notice_top + $notice_height);
 	}
 
 	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
@@ -928,11 +1176,11 @@ class pdf_espadon extends ModelePdfExpedition
 	{
 		global $conf;
 
-		// Force to disable hidetop and hidebottom
-		$hidebottom = 0;
+		// Normalize hidetop parameter (convert truthy values to -1)
 		if ($hidetop) {
 			$hidetop = -1;
 		}
+		// Note: hidebottom is now used as passed, not forced to 0
 
 		$currency = !empty($currency) ? $currency : $conf->currency;
 		$default_font_size = pdf_getPDFFontSize($outputlangs);
@@ -941,23 +1189,97 @@ class pdf_espadon extends ModelePdfExpedition
 		$pdf->SetTextColor(0, 0, 0);
 		$pdf->SetFont('', '', $default_font_size - 2);
 
+		// Calculate main table width (from left margin to Liste Colis table)
+		$mainTableWidth = $this->posxlistecolis - $this->marge_gauche - 2;
+
 		if (empty($hidetop)) {
 			if (getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')) {
-				$pdf->Rect($this->marge_gauche, $tab_top, $this->page_largeur - $this->marge_droite - $this->marge_gauche, $this->tabTitleHeight, 'F', null, explode(',', getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')));
+				$pdf->Rect($this->marge_gauche, $tab_top, $mainTableWidth, $this->tabTitleHeight, 'F', null, explode(',', getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')));
 			}
 		}
 
 		$pdf->SetDrawColor(128, 128, 128);
 		$pdf->SetFont('', '', $default_font_size - 1);
 
-		// Output Rect
-		$this->printRect($pdf, $this->marge_gauche, $tab_top, $this->page_largeur - $this->marge_gauche - $this->marge_droite, $tab_height, $hidetop, $hidebottom); // Rect takes a length in 3rd parameter and 4th parameter
-
+		// Output Rect for main table only (Designation + Qty)
+		$this->printRect($pdf, $this->marge_gauche, $tab_top, $mainTableWidth, $tab_height, $hidetop, $hidebottom);
 
 		$this->pdfTabTitles($pdf, $tab_top, $tab_height, $outputlangs, $hidetop);
 
 		if (empty($hidetop)) {
-			$pdf->line($this->marge_gauche, $tab_top + $this->tabTitleHeight, $this->page_largeur - $this->marge_droite, $tab_top + $this->tabTitleHeight); // line takes a position y in 2nd parameter and 4th parameter
+			$pdf->line($this->marge_gauche, $tab_top + $this->tabTitleHeight, $this->posxlistecolis - 2, $tab_top + $this->tabTitleHeight);
+		}
+	}
+
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
+	/**
+	 *   Show secondary table on the right for extrafield listecolis_fp
+	 *
+	 *   @param		TCPDF		$pdf     		Object PDF
+	 *   @param		float|int	$tab_top		Top position of table
+	 *   @param		float|int	$tab_height		Height of table (rectangle)
+	 *   @param		Expedition	$object			Expedition object
+	 *   @param		Translate	$outputlangs	Langs object
+	 *   @return	void
+	 */
+	protected function _tableau_secondaire(&$pdf, $tab_top, $tab_height, $object, $outputlangs)
+	{
+		$default_font_size = pdf_getPDFFontSize($outputlangs);
+
+		// Get the extrafield value from the expedition object (not from origin order)
+		$listecolis_content = '';
+		if (!empty($object->array_options['options_listecolis_fp'])) {
+			$listecolis_content = $object->array_options['options_listecolis_fp'];
+		}
+
+		// Calculate Liste Colis table dimensions
+		$listeColisX = $this->posxlistecolis;
+		$listeColisWidth = $this->page_largeur - $this->marge_droite - $listeColisX;
+
+		// Draw the rectangle for Liste Colis table
+		$pdf->SetDrawColor(128, 128, 128);
+		$pdf->Rect($listeColisX, $tab_top, $listeColisWidth, $tab_height);
+
+		// Title background
+		if (getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')) {
+			$pdf->Rect($listeColisX, $tab_top, $listeColisWidth, $this->tabTitleHeight, 'F', null, explode(',', getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')));
+		}
+
+		// Draw title
+		$pdf->SetFont('', 'B', $default_font_size - 1);
+		$pdf->SetXY($listeColisX, $tab_top);
+		$pdf->SetTextColor(0, 0, 0);
+		$pdf->Cell($listeColisWidth, $this->tabTitleHeight, "Liste Colis", 0, 0, 'C', false);
+
+		// Draw line after title
+		$pdf->line($listeColisX, $tab_top + $this->tabTitleHeight, $listeColisX + $listeColisWidth, $tab_top + $this->tabTitleHeight);
+
+		// Draw content with pagination support (Einstein format)
+		$pdf->SetFont('', '', $default_font_size - 2);
+		if (!empty($listecolis_content)) {
+			$availableHeight = $tab_height - $this->tabTitleHeight - 2;
+
+			// Split content by marker: <hr /><br /> or <hr/><br/> or <hr><br> variations
+			$chunks = preg_split('/<hr\s*\/?>\s*<br\s*\/?>/i', $listecolis_content);
+
+			// Check if we have a chunk for the current index
+			if (isset($chunks[self::$listeColisChunkIndex])) {
+				$currentChunk = trim($chunks[self::$listeColisChunkIndex]);
+
+				if (!empty($currentChunk)) {
+					// Disable auto page break to prevent overflow
+					$autoPageBreak = $pdf->getAutoPageBreak();
+					$pdf->SetAutoPageBreak(false);
+
+					// Render current chunk with strict height limit
+					$pdf->writeHTMLCell($listeColisWidth - 2, $availableHeight, $listeColisX + 1, $tab_top + $this->tabTitleHeight + 1, dol_htmlentitiesbr($currentChunk), 0, 0, false, true, 'L', true);
+
+					$pdf->SetAutoPageBreak($autoPageBreak);
+				}
+
+				// Increment chunk index for next page
+				self::$listeColisChunkIndex++;
+			}
 		}
 	}
 
@@ -1025,7 +1347,7 @@ class pdf_espadon extends ModelePdfExpedition
 		$pdf->SetFont('', 'B', $default_font_size + 2);
 		$pdf->SetXY($posx, $posy);
 		$pdf->SetTextColor(0, 0, 60);
-		$title = $outputlangs->transnoentities("SendingSheet");
+		$title = "Bon de livraison";
 		$pdf->MultiCell($w, 4, $title, '', 'R');
 
 		$pdf->SetFont('', '', $default_font_size + 1);
@@ -1035,6 +1357,14 @@ class pdf_espadon extends ModelePdfExpedition
 		$pdf->SetXY($posx, $posy);
 		$pdf->SetTextColor(0, 0, 60);
 		$pdf->MultiCell($w, 4, $outputlangs->transnoentities("RefSending")." : ".$object->ref, '', 'R');
+
+		// Date du BL (extrafield)
+		if (!empty($object->array_options['options_date_du_bl'])) {
+			$posy += 4;
+			$pdf->SetXY($posx, $posy);
+			$pdf->SetTextColor(0, 0, 60);
+			$pdf->MultiCell($w, 4, "Date BL : ".dol_print_date($object->array_options['options_date_du_bl'], "day", false, $outputlangs, true), '', 'R');
+		}
 
 		// Date planned delivery
 		if (!empty($object->date_delivery)) {
@@ -1248,7 +1578,7 @@ class pdf_espadon extends ModelePdfExpedition
 
 		// Default field style for content
 		$this->defaultTitlesFieldsStyle = array(
-			'align' => 'C', // R,C,L
+			'align' => 'L', // R,C,L - Left align for column titles
 			'padding' => array(0.5, 0, 0.5, 0), // Like css 0 => top , 1 => right, 2 => bottom, 3 => left
 		);
 
@@ -1273,7 +1603,7 @@ class pdf_espadon extends ModelePdfExpedition
 		$rank = 0; // do not use negative rank
 		$this->cols['desc'] = array(
 			'rank' => $rank,
-			'width' => false, // only for desc
+			'width' => ($this->posxqty - $this->posxdesc), // Einstein format: from posxdesc to posxqty (~79mm)
 			'status' => true,
 			'title' => array(
 				'textkey' => 'Designation', // use lang key is useful in somme case with module
@@ -1311,11 +1641,11 @@ class pdf_espadon extends ModelePdfExpedition
 		$this->cols['weight'] = array(
 			'rank' => $rank,
 			'width' => 30, // in mm
-			'status' => true,
+			'status' => false,
 			'title' => array(
 				'textkey' => 'WeightVolShort'
 			),
-			'border-left' => true, // add left line separator
+			'border-left' => false, // add left line separator
 		);
 
 
@@ -1327,7 +1657,7 @@ class pdf_espadon extends ModelePdfExpedition
 			'title' => array(
 				'textkey' => 'PriceUHT'
 			),
-			'border-left' => true, // add left line separator
+			'border-left' => false, // add left line separator
 		);
 
 		$rank = $rank + 10;
@@ -1338,18 +1668,18 @@ class pdf_espadon extends ModelePdfExpedition
 			'title' => array(
 				'textkey' => 'TotalHT'
 			),
-			'border-left' => true, // add left line separator
+			'border-left' => false, // add left line separator
 		);
 
 		$rank = $rank + 10;
 		$this->cols['qty_asked'] = array(
 			'rank' => $rank,
 			'width' => 30, // in mm
-			'status' => !getDolGlobalString('SHIPPING_PDF_HIDE_ORDERED') ? 1 : 0,
+			'status' => false,
 			'title' => array(
 				'textkey' => 'QtyOrdered'
 			),
-			'border-left' => true, // add left line separator
+			'border-left' => false, // add left line separator
 			'content' => array(
 				'align' => 'C',
 			),
@@ -1357,13 +1687,13 @@ class pdf_espadon extends ModelePdfExpedition
 
 		$rank = $rank + 10;
 		$this->cols['unit_order'] = array(
-			'rank' => $rank,
-			'width' => 15, // in mm
-			'status' => !getDolGlobalString('PRODUCT_USE_UNITS') ? 0 : 1,
+			'rank' => 30,
+			'width' => 10, // in mm
+			'status' => false, // Hidden - unit now displayed with qty_shipped
 			'title' => array(
 				'textkey' => 'Unit'
 			),
-			'border-left' => true, // add left line separator
+			'border-left' => false, // add left line separator
 			'content' => array(
 				'align' => 'C',
 			),
@@ -1371,13 +1701,13 @@ class pdf_espadon extends ModelePdfExpedition
 
 		$rank = $rank + 10;
 		$this->cols['qty_shipped'] = array(
-			'rank' => $rank,
-			'width' => 30, // in mm
+			'rank' => 20,
+			'width' => ($this->posxlistecolis - $this->posxqty - 2), // Einstein format: from posxqty to posxlistecolis (~35mm)
 			'status' => true,
 			'title' => array(
 				'textkey' => 'QtyToShip'
 			),
-			'border-left' => true, // add left line separator
+			'border-left' => false, // add left line separator
 			'content' => array(
 				'align' => 'C',
 			),
@@ -1405,6 +1735,22 @@ class pdf_espadon extends ModelePdfExpedition
 			$this->cols = array_replace($this->cols, $hookmanager->resArray); // array_replace is used to preserve keys
 		} else {
 			$this->cols = $hookmanager->resArray;
+		}
+
+		// Remove all vertical borders (including extrafields)
+		foreach ($this->cols as $key => $col) {
+			if (isset($this->cols[$key]['border-left'])) {
+				$this->cols[$key]['border-left'] = false;
+			}
+		}
+
+		// Temporarily hide extrafields in product lines (will be re-enabled with 2-column system later)
+		foreach ($this->cols as $key => $col) {
+			// Check if this is an extrafield column
+			if (strpos($key, 'options_') === 0 || strpos($key, 'ef_') === 0) {
+				// Hide extrafields for now (Einstein 2-column system not yet implemented)
+				$this->cols[$key]['status'] = false;
+			}
 		}
 	}
 }
