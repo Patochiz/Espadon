@@ -1186,6 +1186,7 @@ class pdf_espadon extends ModelePdfExpedition
 	protected function parseListeColisHTML($htmlContent)
 	{
 		$lines = array();
+		$isFirstTitle = true;
 
 		// Remove page break markers
 		$htmlContent = preg_replace('/<hr\s*\/?>\s*<br\s*\/?>/i', '', $htmlContent);
@@ -1198,6 +1199,15 @@ class pdf_espadon extends ModelePdfExpedition
 				foreach ($subLines as $subLine) {
 					$subLine = trim($subLine);
 					if (!empty($subLine)) {
+						// Check if line is a title (contains <strong> or <b>)
+						$isTitle = preg_match('/<(strong|b)[\s>]/i', $subLine);
+						// Add empty line before titles (except first one)
+						if ($isTitle && !$isFirstTitle) {
+							$lines[] = '<div style="margin:0;padding:0;">&nbsp;</div>';
+						}
+						if ($isTitle) {
+							$isFirstTitle = false;
+						}
 						$lines[] = '<div style="margin:0;padding:0;">' . $subLine . '</div>';
 					}
 				}
@@ -1208,6 +1218,15 @@ class pdf_espadon extends ModelePdfExpedition
 			foreach ($subLines as $subLine) {
 				$subLine = trim($subLine);
 				if (!empty($subLine)) {
+					// Check if line is a title (contains <strong> or <b>)
+					$isTitle = preg_match('/<(strong|b)[\s>]/i', $subLine);
+					// Add empty line before titles (except first one)
+					if ($isTitle && !$isFirstTitle) {
+						$lines[] = '<div style="margin:0;padding:0;">&nbsp;</div>';
+					}
+					if ($isTitle) {
+						$isFirstTitle = false;
+					}
 					$lines[] = '<div style="margin:0;padding:0;">' . $subLine . '</div>';
 				}
 			}
