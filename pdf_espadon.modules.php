@@ -1199,8 +1199,9 @@ class pdf_espadon extends ModelePdfExpedition
 				foreach ($subLines as $subLine) {
 					$subLine = trim($subLine);
 					if (!empty($subLine)) {
-						// Check if line is a title (contains <strong> or <b>)
-						$isTitle = preg_match('/<(strong|b)[\s>]/i', $subLine);
+						// Check if line is a section title (starts with <strong> and text starts with letter)
+						// Titles are like "BRUNETEAU / PRISON BATIMENT MH-3", not "1 colis de..."
+						$isTitle = preg_match('/^<(strong|b)[\s>].*[A-Z]{2,}/i', $subLine) && !preg_match('/^\s*<(strong|b)[\s>]\s*\d/i', $subLine);
 						// Add empty line before titles (except first one)
 						if ($isTitle && !$isFirstTitle) {
 							$lines[] = '<div style="margin:0;padding:0;">&nbsp;</div>';
@@ -1218,8 +1219,8 @@ class pdf_espadon extends ModelePdfExpedition
 			foreach ($subLines as $subLine) {
 				$subLine = trim($subLine);
 				if (!empty($subLine)) {
-					// Check if line is a title (contains <strong> or <b>)
-					$isTitle = preg_match('/<(strong|b)[\s>]/i', $subLine);
+					// Check if line is a section title (starts with <strong> and text starts with letter)
+					$isTitle = preg_match('/^<(strong|b)[\s>].*[A-Z]{2,}/i', $subLine) && !preg_match('/^\s*<(strong|b)[\s>]\s*\d/i', $subLine);
 					// Add empty line before titles (except first one)
 					if ($isTitle && !$isFirstTitle) {
 						$lines[] = '<div style="margin:0;padding:0;">&nbsp;</div>';
