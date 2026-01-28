@@ -711,7 +711,7 @@ class pdf_espadon extends ModelePdfExpedition
 
 						if ($isTitleService) {
 							// Special handling for title service (ID 361): display description in BOLD spanning Designation + Qty columns
-							$pdf->SetFont('', 'B', $default_font_size);
+							$pdf->SetFont('', 'B', $default_font_size - 1);
 							$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
 							// Use description field for title text
@@ -742,7 +742,7 @@ class pdf_espadon extends ModelePdfExpedition
 
 							if ($isTitleService) {
 								// Redisplay title service on new page
-								$pdf->SetFont('', 'B', $default_font_size);
+								$pdf->SetFont('', 'B', $default_font_size - 1);
 								$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
 								// Use description field for title text
