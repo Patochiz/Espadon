@@ -710,21 +710,18 @@ class pdf_espadon extends ModelePdfExpedition
 						$pdf->startTransaction();
 
 						if ($isTitleService) {
-							// Special handling for title service (ID 361): display ref_chantier in BOLD spanning Designation + Qty columns
+							// Special handling for title service (ID 361): display description in BOLD spanning Designation + Qty columns
 							$pdf->SetFont('', 'B', $default_font_size);
 							$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
-							// Use ref_chantier extrafield for title text (like Einstein)
+							// Use description field for title text
 							$titleText = '';
-							if (!empty($object->lines[$i]->array_options['options_ref_chantier'])) {
-								$titleText = $object->lines[$i]->array_options['options_ref_chantier'];
+							if (!empty($object->lines[$i]->desc)) {
+								$titleText = $object->lines[$i]->desc;
 							}
 
-							// Decode HTML entities and convert to output charset
-							$titleText = html_entity_decode($titleText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-							$titleText = $outputlangs->convToOutputCharset($titleText);
-							$pdf->SetXY($this->posxdesc, $curY);
-							$pdf->MultiCell($fullWidth, 3, $titleText, 0, 'L');
+							// Use writeHTMLCell for HTML support (underline, italic, etc.)
+							$pdf->writeHTMLCell($fullWidth, 3, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
 						} else {
 							// Normal product line - use pdf_writelinedesc like Einstein
 							// If line has detail column, extend width to include Qty column space
@@ -748,16 +745,14 @@ class pdf_espadon extends ModelePdfExpedition
 								$pdf->SetFont('', 'B', $default_font_size);
 								$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
-								// Use ref_chantier extrafield for title text (like Einstein)
+								// Use description field for title text
 								$titleText = '';
-								if (!empty($object->lines[$i]->array_options['options_ref_chantier'])) {
-									$titleText = $object->lines[$i]->array_options['options_ref_chantier'];
+								if (!empty($object->lines[$i]->desc)) {
+									$titleText = $object->lines[$i]->desc;
 								}
 
-								$titleText = html_entity_decode($titleText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-								$titleText = $outputlangs->convToOutputCharset($titleText);
-								$pdf->SetXY($this->posxdesc, $curY);
-								$pdf->MultiCell($fullWidth, 3, $titleText, 0, 'L');
+								// Use writeHTMLCell for HTML support (underline, italic, etc.)
+								$pdf->writeHTMLCell($fullWidth, 3, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
 							} else {
 								// Normal product line - use pdf_writelinedesc like Einstein
 								if ($hasDetailColumn) {
