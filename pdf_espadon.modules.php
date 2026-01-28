@@ -710,58 +710,31 @@ class pdf_espadon extends ModelePdfExpedition
 						$pdf->startTransaction();
 
 						if ($isTitleService) {
-							// Special handling for title service (ID 361): display description in BOLD spanning Designation + Qty columns
+							// Special handling for title service (ID 361): display ref_chantier in BOLD spanning Designation + Qty columns
 							$pdf->SetFont('', 'B', $default_font_size);
 							$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
-							// Use description field for title text
+							// Use ref_chantier extrafield for title text (like Einstein)
 							$titleText = '';
-							if (!empty($object->lines[$i]->desc)) {
-								$titleText = $object->lines[$i]->desc;
+							if (!empty($object->lines[$i]->array_options['options_ref_chantier'])) {
+								$titleText = $object->lines[$i]->array_options['options_ref_chantier'];
 							}
 
-							// Use writeHTMLCell for HTML support (underline, italic, etc.)
-							$pdf->writeHTMLCell($fullWidth, 3, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
-							// Add small spacing after title to separate from next product
-							$pdf->Ln(1);
+							// Decode HTML entities and convert to output charset
+							$titleText = html_entity_decode($titleText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+							$titleText = $outputlangs->convToOutputCharset($titleText);
+							$pdf->SetXY($this->posxdesc, $curY);
+							$pdf->MultiCell($fullWidth, 3, $titleText, 0, 'L');
 						} else {
-							// Normal product line
-							// First, display product label spanning both Désignation and Détail columns (100mm)
-							$product_label = '';
-							if (!empty($object->lines[$i]->product_label)) {
-								$product_label = $object->lines[$i]->product_label;
-							} elseif (!empty($object->lines[$i]->label)) {
-								$product_label = $object->lines[$i]->label;
-							}
-
-							if (!empty($product_label)) {
-								$pdf->SetFont('', 'B', $default_font_size - 2);
-								$pdf->SetXY($this->getColumnContentXStart('desc'), $curY);
-								// Display label on 100mm (Désignation + Détail columns)
-								$pdf->writeHTMLCell(100, 0, $this->getColumnContentXStart('desc'), $curY, dol_htmlentitiesbr($product_label), 0, 1, false, true, 'L');
-								$curY = $pdf->GetY();
-								// Reset font to normal for product description
-								$pdf->SetFont('', '', $default_font_size - 2);
-							}
-
-							// Then display the rest of the description
-							// Temporarily hide label to prevent duplication
-							$saved_label = $object->lines[$i]->label ?? null;
-							$saved_product_label = $object->lines[$i]->product_label ?? null;
-							$object->lines[$i]->label = '';
-							$object->lines[$i]->product_label = '';
-
+							// Normal product line - use pdf_writelinedesc like Einstein
 							// If line has detail column, extend width to include Qty column space
 							if ($hasDetailColumn) {
 								$lineWidth = $this->posxlistecolis - $this->posxdesc - 2;
-								$pdf->writeHTMLCell($lineWidth, 0, $this->posxdesc, $curY, $object->lines[$i]->desc, 0, 1, false, true, 'L');
+								pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 							} else {
-								$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+								$lineWidth = $this->posxqty - $this->posxdesc;
+								pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 							}
-
-							// Restore original labels
-							$object->lines[$i]->label = $saved_label;
-							$object->lines[$i]->product_label = $saved_product_label;
 						}
 
 						$pageposafter = $pdf->getPage();
@@ -775,48 +748,25 @@ class pdf_espadon extends ModelePdfExpedition
 								$pdf->SetFont('', 'B', $default_font_size);
 								$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
+								// Use ref_chantier extrafield for title text (like Einstein)
 								$titleText = '';
-								if (!empty($object->lines[$i]->desc)) {
-									$titleText = $object->lines[$i]->desc;
+								if (!empty($object->lines[$i]->array_options['options_ref_chantier'])) {
+									$titleText = $object->lines[$i]->array_options['options_ref_chantier'];
 								}
 
-								// Use writeHTMLCell for HTML support (underline, italic, etc.)
-								$pdf->writeHTMLCell($fullWidth, 4, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
-								// Add small spacing after title to separate from next product
-								$pdf->Ln(1);
+								$titleText = html_entity_decode($titleText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+								$titleText = $outputlangs->convToOutputCharset($titleText);
+								$pdf->SetXY($this->posxdesc, $curY);
+								$pdf->MultiCell($fullWidth, 3, $titleText, 0, 'L');
 							} else {
-								// Redisplay product label on new page
-								$product_label = '';
-								if (!empty($object->lines[$i]->product_label)) {
-									$product_label = $object->lines[$i]->product_label;
-								} elseif (!empty($object->lines[$i]->label)) {
-									$product_label = $object->lines[$i]->label;
-								}
-
-								if (!empty($product_label)) {
-									$pdf->SetFont('', 'B', $default_font_size - 2);
-									$pdf->SetXY($this->getColumnContentXStart('desc'), $curY);
-									$pdf->writeHTMLCell(100, 0, $this->getColumnContentXStart('desc'), $curY, dol_htmlentitiesbr($product_label), 0, 1, false, true, 'L');
-									$curY = $pdf->GetY();
-									// Reset font to normal for product description
-									$pdf->SetFont('', '', $default_font_size - 2);
-								}
-
-								// Temporarily hide label again to prevent duplication on retry
-								$object->lines[$i]->label = '';
-								$object->lines[$i]->product_label = '';
-
-								// If line has detail column, extend width to include Qty column space
+								// Normal product line - use pdf_writelinedesc like Einstein
 								if ($hasDetailColumn) {
 									$lineWidth = $this->posxlistecolis - $this->posxdesc - 2;
-									$pdf->writeHTMLCell($lineWidth, 0, $this->posxdesc, $curY, $object->lines[$i]->desc, 0, 1, false, true, 'L');
+									pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 								} else {
-									$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+									$lineWidth = $this->posxqty - $this->posxdesc;
+									pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 								}
-
-								// Restore original labels
-								$object->lines[$i]->label = $saved_label;
-								$object->lines[$i]->product_label = $saved_product_label;
 							}
 
 							$pageposafter = $pdf->getPage();
