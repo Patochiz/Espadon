@@ -886,10 +886,10 @@ class pdf_espadon extends ModelePdfExpedition
 						$pdf->setPage($pagenb);
 						if ($pagenb == $pageposbeforeprintlines) {
 							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
-							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 1);
 						} else {
 							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
-							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 1);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						$pagenb++;
@@ -905,10 +905,10 @@ class pdf_espadon extends ModelePdfExpedition
 					if (isset($object->lines[$i + 1]->pagebreak) && $object->lines[$i + 1]->pagebreak) {
 						if ($pagenb == 1) {
 							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
-							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 1);
 						} else {
 							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
-							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 1);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						// New page
@@ -1250,9 +1250,10 @@ class pdf_espadon extends ModelePdfExpedition
 	 *   @param		float|int	$tab_height		Height of table (rectangle)
 	 *   @param		Expedition	$object			Expedition object
 	 *   @param		Translate	$outputlangs	Langs object
+	 *   @param		int			$hidebottom		Hide bottom bar of array (for intermediate pages)
 	 *   @return	void
 	 */
-	protected function _tableau_secondaire(&$pdf, $tab_top, $tab_height, $object, $outputlangs)
+	protected function _tableau_secondaire(&$pdf, $tab_top, $tab_height, $object, $outputlangs, $hidebottom = 0)
 	{
 		$default_font_size = pdf_getPDFFontSize($outputlangs);
 
@@ -1266,9 +1267,18 @@ class pdf_espadon extends ModelePdfExpedition
 		$listeColisX = $this->posxlistecolis;
 		$listeColisWidth = $this->page_largeur - $this->marge_droite - $listeColisX;
 
-		// Draw the rectangle for Liste Colis table
+		// Draw the rectangle for Liste Colis table (with hidebottom support like printRect)
 		$pdf->SetDrawColor(128, 128, 128);
-		$pdf->Rect($listeColisX, $tab_top, $listeColisWidth, $tab_height);
+		// Draw top line
+		$pdf->line($listeColisX, $tab_top, $listeColisX + $listeColisWidth, $tab_top);
+		// Draw left line
+		$pdf->line($listeColisX, $tab_top, $listeColisX, $tab_top + $tab_height);
+		// Draw right line
+		$pdf->line($listeColisX + $listeColisWidth, $tab_top, $listeColisX + $listeColisWidth, $tab_top + $tab_height);
+		// Draw bottom line only if not hidden
+		if (empty($hidebottom)) {
+			$pdf->line($listeColisX, $tab_top + $tab_height, $listeColisX + $listeColisWidth, $tab_top + $tab_height);
+		}
 
 		// Title background
 		if (getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')) {
