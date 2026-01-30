@@ -292,9 +292,14 @@ class pdf_espadon extends ModelePdfExpedition
 				$col1_width = $total_width * 0.70;
 				$colisage_height = $pdf->getStringHeight($col1_width - 2, mb_strtoupper($colisage_extrafield, 'UTF-8'));
 
-				// Optimized heights for better space usage (colisage 10mm + transporteur 15mm + notice 15mm + spacings 4mm = ~44mm, reduced to 38mm for better page usage)
-				$extra_colisage_height = max(0, $colisage_height - 5);
-				$heightforinfotot = 38 + $extra_colisage_height; // Height reserved to output the info and total part (colisage+transporteur+notice tables)
+				// Calculate exact heights:
+				// - Colisage table: max(5, colisage_height + 2) + 5 (row2) = colisage_height + 7 minimum, or 10 if colisage small
+				// - Transporteur: 15mm (3 rows × 5mm)
+				// - Notice: 15mm
+				// - Spacings: 2mm + 2mm = 4mm
+				$colisage_row1_height = max(5, $colisage_height + 2);
+				$colisage_table_height = $colisage_row1_height + 5; // row1 + row2
+				$heightforinfotot = $colisage_table_height + 15 + 15 + 4 + 2; // colisage + transporteur + notice + spacings + margin
 				$heightforfreetext = (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT) ? $conf->global->MAIN_PDF_FREETEXT_HEIGHT : 3); // Height reserved to output the free text on last page (reduced from 5 to 3)
 				$heightforfooter = $this->marge_basse + 8; // Height reserved to output the footer (value include bottom margin)
 				if (getDolGlobalString('MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS')) {
@@ -711,7 +716,7 @@ class pdf_espadon extends ModelePdfExpedition
 
 						if ($isTitleService) {
 							// Special handling for title service (ID 361): display description in BOLD spanning Designation + Qty columns
-							$pdf->SetFont('', 'B', $default_font_size);
+							$pdf->SetFont('', 'B', $default_font_size - 1);
 							$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
 							// Use description field for title text
@@ -722,46 +727,16 @@ class pdf_espadon extends ModelePdfExpedition
 
 							// Use writeHTMLCell for HTML support (underline, italic, etc.)
 							$pdf->writeHTMLCell($fullWidth, 3, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
-							// Add small spacing after title to separate from next product
-							$pdf->Ln(1);
 						} else {
-							// Normal product line
-							// First, display product label spanning both Désignation and Détail columns (100mm)
-							$product_label = '';
-							if (!empty($object->lines[$i]->product_label)) {
-								$product_label = $object->lines[$i]->product_label;
-							} elseif (!empty($object->lines[$i]->label)) {
-								$product_label = $object->lines[$i]->label;
-							}
-
-							if (!empty($product_label)) {
-								$pdf->SetFont('', 'B', $default_font_size - 2);
-								$pdf->SetXY($this->getColumnContentXStart('desc'), $curY);
-								// Display label on 100mm (Désignation + Détail columns)
-								$pdf->writeHTMLCell(100, 0, $this->getColumnContentXStart('desc'), $curY, dol_htmlentitiesbr($product_label), 0, 1, false, true, 'L');
-								$curY = $pdf->GetY();
-								// Reset font to normal for product description
-								$pdf->SetFont('', '', $default_font_size - 2);
-							}
-
-							// Then display the rest of the description
-							// Temporarily hide label to prevent duplication
-							$saved_label = $object->lines[$i]->label ?? null;
-							$saved_product_label = $object->lines[$i]->product_label ?? null;
-							$object->lines[$i]->label = '';
-							$object->lines[$i]->product_label = '';
-
+							// Normal product line - use pdf_writelinedesc like Einstein
 							// If line has detail column, extend width to include Qty column space
 							if ($hasDetailColumn) {
 								$lineWidth = $this->posxlistecolis - $this->posxdesc - 2;
-								$pdf->writeHTMLCell($lineWidth, 0, $this->posxdesc, $curY, $object->lines[$i]->desc, 0, 1, false, true, 'L');
+								pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 							} else {
-								$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+								$lineWidth = $this->posxqty - $this->posxdesc;
+								pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 							}
-
-							// Restore original labels
-							$object->lines[$i]->label = $saved_label;
-							$object->lines[$i]->product_label = $saved_product_label;
 						}
 
 						$pageposafter = $pdf->getPage();
@@ -772,51 +747,26 @@ class pdf_espadon extends ModelePdfExpedition
 
 							if ($isTitleService) {
 								// Redisplay title service on new page
-								$pdf->SetFont('', 'B', $default_font_size);
+								$pdf->SetFont('', 'B', $default_font_size - 1);
 								$fullWidth = $this->posxlistecolis - $this->posxdesc;
 
+								// Use description field for title text
 								$titleText = '';
 								if (!empty($object->lines[$i]->desc)) {
 									$titleText = $object->lines[$i]->desc;
 								}
 
 								// Use writeHTMLCell for HTML support (underline, italic, etc.)
-								$pdf->writeHTMLCell($fullWidth, 4, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
-								// Add small spacing after title to separate from next product
-								$pdf->Ln(1);
+								$pdf->writeHTMLCell($fullWidth, 3, $this->posxdesc, $curY, dol_htmlentitiesbr($titleText), 0, 1, false, true, 'L');
 							} else {
-								// Redisplay product label on new page
-								$product_label = '';
-								if (!empty($object->lines[$i]->product_label)) {
-									$product_label = $object->lines[$i]->product_label;
-								} elseif (!empty($object->lines[$i]->label)) {
-									$product_label = $object->lines[$i]->label;
-								}
-
-								if (!empty($product_label)) {
-									$pdf->SetFont('', 'B', $default_font_size - 2);
-									$pdf->SetXY($this->getColumnContentXStart('desc'), $curY);
-									$pdf->writeHTMLCell(100, 0, $this->getColumnContentXStart('desc'), $curY, dol_htmlentitiesbr($product_label), 0, 1, false, true, 'L');
-									$curY = $pdf->GetY();
-									// Reset font to normal for product description
-									$pdf->SetFont('', '', $default_font_size - 2);
-								}
-
-								// Temporarily hide label again to prevent duplication on retry
-								$object->lines[$i]->label = '';
-								$object->lines[$i]->product_label = '';
-
-								// If line has detail column, extend width to include Qty column space
+								// Normal product line - use pdf_writelinedesc like Einstein
 								if ($hasDetailColumn) {
 									$lineWidth = $this->posxlistecolis - $this->posxdesc - 2;
-									$pdf->writeHTMLCell($lineWidth, 0, $this->posxdesc, $curY, $object->lines[$i]->desc, 0, 1, false, true, 'L');
+									pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 								} else {
-									$this->printColDescContent($pdf, $curY, 'desc', $object, $i, $outputlangs, $hideref, $hidedesc);
+									$lineWidth = $this->posxqty - $this->posxdesc;
+									pdf_writelinedesc($pdf, $object, $i, $outputlangs, $lineWidth, 3, $this->posxdesc, $curY, $hideref, $hidedesc);
 								}
-
-								// Restore original labels
-								$object->lines[$i]->label = $saved_label;
-								$object->lines[$i]->product_label = $saved_product_label;
 							}
 
 							$pageposafter = $pdf->getPage();
@@ -935,11 +885,11 @@ class pdf_espadon extends ModelePdfExpedition
 					while ($pagenb < $pageposafter) {
 						$pdf->setPage($pagenb);
 						if ($pagenb == $pageposbeforeprintlines) {
-							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
-							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs);
+							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 0);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 0);
 						} else {
-							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
-							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs);
+							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 0);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 0);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						$pagenb++;
@@ -954,11 +904,11 @@ class pdf_espadon extends ModelePdfExpedition
 					}
 					if (isset($object->lines[$i + 1]->pagebreak) && $object->lines[$i + 1]->pagebreak) {
 						if ($pagenb == 1) {
-							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
-							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs);
+							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 0);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 0);
 						} else {
-							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
-							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs);
+							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 0);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 0);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						// New page
@@ -1241,6 +1191,7 @@ class pdf_espadon extends ModelePdfExpedition
 	protected function parseListeColisHTML($htmlContent)
 	{
 		$lines = array();
+		$isFirstTitle = true;
 
 		// Remove page break markers
 		$htmlContent = preg_replace('/<hr\s*\/?>\s*<br\s*\/?>/i', '', $htmlContent);
@@ -1253,6 +1204,16 @@ class pdf_espadon extends ModelePdfExpedition
 				foreach ($subLines as $subLine) {
 					$subLine = trim($subLine);
 					if (!empty($subLine)) {
+						// Check if line is a section title (starts with <strong> and text starts with letter)
+						// Titles are like "BRUNETEAU / PRISON BATIMENT MH-3", not "1 colis de..."
+						$isTitle = preg_match('/^<(strong|b)[\s>].*[A-Z]{2,}/i', $subLine) && !preg_match('/^\s*<(strong|b)[\s>]\s*\d/i', $subLine);
+						// Add empty line before titles (except first one)
+						if ($isTitle && !$isFirstTitle) {
+							$lines[] = '<div style="margin:0;padding:0;">&nbsp;</div>';
+						}
+						if ($isTitle) {
+							$isFirstTitle = false;
+						}
 						$lines[] = '<div style="margin:0;padding:0;">' . $subLine . '</div>';
 					}
 				}
@@ -1263,6 +1224,15 @@ class pdf_espadon extends ModelePdfExpedition
 			foreach ($subLines as $subLine) {
 				$subLine = trim($subLine);
 				if (!empty($subLine)) {
+					// Check if line is a section title (starts with <strong> and text starts with letter)
+					$isTitle = preg_match('/^<(strong|b)[\s>].*[A-Z]{2,}/i', $subLine) && !preg_match('/^\s*<(strong|b)[\s>]\s*\d/i', $subLine);
+					// Add empty line before titles (except first one)
+					if ($isTitle && !$isFirstTitle) {
+						$lines[] = '<div style="margin:0;padding:0;">&nbsp;</div>';
+					}
+					if ($isTitle) {
+						$isFirstTitle = false;
+					}
 					$lines[] = '<div style="margin:0;padding:0;">' . $subLine . '</div>';
 				}
 			}
@@ -1280,9 +1250,10 @@ class pdf_espadon extends ModelePdfExpedition
 	 *   @param		float|int	$tab_height		Height of table (rectangle)
 	 *   @param		Expedition	$object			Expedition object
 	 *   @param		Translate	$outputlangs	Langs object
+	 *   @param		int			$hidebottom		Hide bottom bar of array (for intermediate pages)
 	 *   @return	void
 	 */
-	protected function _tableau_secondaire(&$pdf, $tab_top, $tab_height, $object, $outputlangs)
+	protected function _tableau_secondaire(&$pdf, $tab_top, $tab_height, $object, $outputlangs, $hidebottom = 0)
 	{
 		$default_font_size = pdf_getPDFFontSize($outputlangs);
 
@@ -1296,9 +1267,18 @@ class pdf_espadon extends ModelePdfExpedition
 		$listeColisX = $this->posxlistecolis;
 		$listeColisWidth = $this->page_largeur - $this->marge_droite - $listeColisX;
 
-		// Draw the rectangle for Liste Colis table
+		// Draw the rectangle for Liste Colis table (with hidebottom support like printRect)
 		$pdf->SetDrawColor(128, 128, 128);
-		$pdf->Rect($listeColisX, $tab_top, $listeColisWidth, $tab_height);
+		// Draw top line
+		$pdf->line($listeColisX, $tab_top, $listeColisX + $listeColisWidth, $tab_top);
+		// Draw left line
+		$pdf->line($listeColisX, $tab_top, $listeColisX, $tab_top + $tab_height);
+		// Draw right line
+		$pdf->line($listeColisX + $listeColisWidth, $tab_top, $listeColisX + $listeColisWidth, $tab_top + $tab_height);
+		// Draw bottom line only if not hidden
+		if (empty($hidebottom)) {
+			$pdf->line($listeColisX, $tab_top + $tab_height, $listeColisX + $listeColisWidth, $tab_top + $tab_height);
+		}
 
 		// Title background
 		if (getDolGlobalString('MAIN_PDF_TITLE_BACKGROUND_COLOR')) {
