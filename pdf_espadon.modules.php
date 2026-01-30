@@ -885,11 +885,11 @@ class pdf_espadon extends ModelePdfExpedition
 					while ($pagenb < $pageposafter) {
 						$pdf->setPage($pagenb);
 						if ($pagenb == $pageposbeforeprintlines) {
-							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
-							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 1);
+							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 0);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 0);
 						} else {
-							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
-							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 1);
+							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 0);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 0);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						$pagenb++;
@@ -904,11 +904,11 @@ class pdf_espadon extends ModelePdfExpedition
 					}
 					if (isset($object->lines[$i + 1]->pagebreak) && $object->lines[$i + 1]->pagebreak) {
 						if ($pagenb == 1) {
-							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1);
-							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 1);
+							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 0);
+							$this->_tableau_secondaire($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, $object, $outputlangs, 0);
 						} else {
-							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1);
-							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 1);
+							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 0);
+							$this->_tableau_secondaire($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, $object, $outputlangs, 0);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
 						// New page
