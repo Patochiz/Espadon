@@ -292,9 +292,14 @@ class pdf_espadon extends ModelePdfExpedition
 				$col1_width = $total_width * 0.70;
 				$colisage_height = $pdf->getStringHeight($col1_width - 2, mb_strtoupper($colisage_extrafield, 'UTF-8'));
 
-				// Optimized heights for better space usage (colisage 10mm + transporteur 15mm + notice 15mm + spacings 4mm = ~44mm, reduced to 38mm for better page usage)
-				$extra_colisage_height = max(0, $colisage_height - 5);
-				$heightforinfotot = 38 + $extra_colisage_height; // Height reserved to output the info and total part (colisage+transporteur+notice tables)
+				// Calculate exact heights:
+				// - Colisage table: max(5, colisage_height + 2) + 5 (row2) = colisage_height + 7 minimum, or 10 if colisage small
+				// - Transporteur: 15mm (3 rows × 5mm)
+				// - Notice: 15mm
+				// - Spacings: 2mm + 2mm = 4mm
+				$colisage_row1_height = max(5, $colisage_height + 2);
+				$colisage_table_height = $colisage_row1_height + 5; // row1 + row2
+				$heightforinfotot = $colisage_table_height + 15 + 15 + 4 + 2; // colisage + transporteur + notice + spacings + margin
 				$heightforfreetext = (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT) ? $conf->global->MAIN_PDF_FREETEXT_HEIGHT : 3); // Height reserved to output the free text on last page (reduced from 5 to 3)
 				$heightforfooter = $this->marge_basse + 8; // Height reserved to output the footer (value include bottom margin)
 				if (getDolGlobalString('MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS')) {
