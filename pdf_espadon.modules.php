@@ -1551,16 +1551,40 @@ class pdf_espadon extends ModelePdfExpedition
 				$result = $object->fetch_contact($arrayidcontact[0]);
 			}
 
-			// Recipient name
-			if ($usecontact && ($object->contact->socid != $object->thirdparty->id && (!isset($conf->global->MAIN_USE_COMPANY_NAME_OF_CONTACT) || getDolGlobalString('MAIN_USE_COMPANY_NAME_OF_CONTACT')))) {
-				$thirdparty = $object->contact;
+			// Construction de l'adresse destinataire (comme Eratosthene)
+			if ($usecontact && $object->contact) {
+				// Nom du contact
+				$carac_client_name = $outputlangs->convToOutputCharset($object->contact->getFullName($outputlangs));
+
+				// Adresse du contact - construction manuelle
+				$carac_client = '';
+				if (!empty($object->contact->address)) {
+					$carac_client .= $object->contact->address . "\n";
+				}
+
+				// Code postal et ville
+				$carac_client .= $outputlangs->convToOutputCharset($object->contact->zip);
+				if (!empty($object->contact->town)) {
+					$carac_client .= ' ' . $outputlangs->convToOutputCharset($object->contact->town);
+				}
+				$carac_client .= "\n";
+
+				// Pays si différent
+				if (!empty($object->contact->country_code) && $object->contact->country_code != $this->emetteur->country_code) {
+					$carac_client .= $outputlangs->convToOutputCharset($outputlangs->transnoentitiesnoconv("Country".$object->contact->country_code)) . "\n";
+				}
+
+				// Téléphone
+				if (!empty($object->contact->phone_pro)) {
+					$carac_client .= "\n" . $outputlangs->transnoentities("Phone") . ": " . $object->contact->phone_pro;
+				} elseif (!empty($object->contact->phone_mobile)) {
+					$carac_client .= "\n" . $outputlangs->transnoentities("Phone") . ": " . $object->contact->phone_mobile;
+				}
 			} else {
-				$thirdparty = $object->thirdparty;
+				// Pas de contact SHIPPING -> utiliser le tiers
+				$carac_client_name = pdfBuildThirdpartyName($object->thirdparty, $outputlangs);
+				$carac_client = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, null, 0, 'targetwithdetails', $object);
 			}
-
-			$carac_client_name = pdfBuildThirdpartyName($thirdparty, $outputlangs);
-
-			$carac_client = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, (!empty($object->contact) ? $object->contact : null), $usecontact, 'targetwithdetails', $object);
 
 			// Show recipient
 			$widthrecbox = getDolGlobalString('MAIN_PDF_USE_ISO_LOCATION') ? 92 : 100;
