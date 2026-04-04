@@ -683,6 +683,7 @@ class pdf_espadon extends ModelePdfExpedition
 							$detail = '';
 							if (!empty($object->lines[$i]->array_options['options_detail'])) {
 								$detail = $object->lines[$i]->array_options['options_detail'];
+								$detail = preg_replace('/background-color\s*:\s*[^;\"\']+;?/', '', $detail);
 							}
 							// Create a 2-column table with description and detail (only if detail exists)
 							// This table will extend into Qty column space for more horizontal room
