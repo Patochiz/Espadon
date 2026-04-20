@@ -713,6 +713,9 @@ class pdf_espadon extends ModelePdfExpedition
 							}
 						}
 
+						$savedDetailBatch = isset($object->lines[$i]->detail_batch) ? $object->lines[$i]->detail_batch : null;
+						$object->lines[$i]->detail_batch = array();
+
 						$pdf->startTransaction();
 
 						if ($isTitleService) {
@@ -795,6 +798,10 @@ class pdf_espadon extends ModelePdfExpedition
 							$pdf->commitTransaction();
 						}
 						$posYAfterDescription = $pdf->GetY();
+
+						if ($savedDetailBatch !== null) {
+							$object->lines[$i]->detail_batch = $savedDetailBatch;
+						}
 					}
 
 					$nexY = max($pdf->GetY(), $posYAfterImage);
