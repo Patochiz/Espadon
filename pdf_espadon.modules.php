@@ -1424,18 +1424,18 @@ class pdf_espadon extends ModelePdfExpedition
 
 		$pdf->SetXY($posx, $posy);
 		$pdf->SetTextColor(0, 0, 60);
-		$pdf->MultiCell($w, 4, $outputlangs->transnoentities("RefSending")." : ".$object->ref, '', 'R');
 
 		// Date du BL (extrafield) — toujours affiché pour permettre l'écriture manuelle
-		$posy += 4;
-		$pdf->SetXY($posx, $posy);
-		$pdf->SetTextColor(0, 0, 60);
+		// La référence d'expédition n'est affichée que si la date BL est renseignée
 		if (!empty($object->array_options['options_date_du_bl'])) {
-			$date_bl_text = "Date BL : ".dol_print_date($object->array_options['options_date_du_bl'], "day", false, $outputlangs, true);
+			$pdf->MultiCell($w, 4, $outputlangs->transnoentities("RefSending")." : ".$object->ref, '', 'R');
+			$posy += 4;
+			$pdf->SetXY($posx, $posy);
+			$pdf->SetTextColor(0, 0, 60);
+			$pdf->MultiCell($w, 4, "Date BL : ".dol_print_date($object->array_options['options_date_du_bl'], "day", false, $outputlangs, true), '', 'R');
 		} else {
-			$date_bl_text = "Date BL : ___________";
+			$pdf->MultiCell($w, 4, "Date BL : ___________", '', 'R');
 		}
-		$pdf->MultiCell($w, 4, $date_bl_text, '', 'R');
 
 		// Date planned delivery
 		if (!empty($object->date_delivery)) {
