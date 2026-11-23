@@ -1591,6 +1591,15 @@ class pdf_espadon extends ModelePdfExpedition
 				} elseif (!empty($object->contact->phone_mobile)) {
 					$carac_client .= "\n" . $outputlangs->transnoentities("Phone") . ": " . $object->contact->phone_mobile;
 				}
+
+				// Extrafield "autre_contact" du contact (comme Eratosthene)
+				if (empty($object->contact->array_options) && method_exists($object->contact, 'fetch_optionals')) {
+					$object->contact->fetch_optionals();
+				}
+				if (!empty($object->contact->array_options['options_autre_contact'])) {
+					$autre_contact = dol_string_nohtmltag(html_entity_decode($object->contact->array_options['options_autre_contact'], ENT_QUOTES | ENT_HTML5, 'UTF-8'), 0);
+					$carac_client .= "\n\n" . $outputlangs->convToOutputCharset(trim($autre_contact));
+				}
 			} else {
 				// Pas de contact SHIPPING -> utiliser le tiers
 				$carac_client_name = pdfBuildThirdpartyName($object->thirdparty, $outputlangs);
